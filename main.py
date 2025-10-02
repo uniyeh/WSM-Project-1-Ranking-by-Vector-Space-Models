@@ -1,7 +1,8 @@
 import os
 import nltk
 import argparse
-import VectorSpace
+from VectorSpace import VectorSpace
+from VectorSpace import RankEvaluation
 
 def readDocuments(directory_path):
     fileNames = []
@@ -10,18 +11,30 @@ def readDocuments(directory_path):
         with open(os.path.join(directory_path, fileName), 'r', encoding='utf-8') as file:
             documents.append(file.read())
             fileNames.append(fileName.replace('.txt',''))
-        return documents, fileNames
+    return documents, fileNames
+
+def readRel(directory_path):
+    relDict = {}
+    with open(directory_path, 'r', encoding='utf-8') as file:
+        for line in file:
+            # Split the line into query and documents then transform the document string into a list
+            query, docStr = line.strip().split('\t')
+            docList = docStr.strip('[]').split(', ')
+            
+            relDict[query] = docList
+    
+    return relDict
 
 def main():
     parser = argparse.ArgumentParser(description="Process English and Chinese queries.")
 
-    parser.add_argument('--Eng_query', type=str, default="planet Taiwan typhoon", help='Input English query (default: "planet Taiwan typhoon")')
-    parser.add_argument('--Chi_query', type=str, default="音樂 科技", help='Input Chinese query (default: "音樂 科技")')
+    parser.add_argument('--en_query', type=str, default="planet Taiwan typhoon", help='Input English query (default: "planet Taiwan typhoon")')
+    parser.add_argument('--ch_query', type=str, default="音樂 科技", help='Input Chinese query (default: "音樂 科技")')
 
     args = parser.parse_args()
 
-    engQuery = args.Eng_query
-    chiQuery = args.Chi_query
+    enQuery = args.en_query
+    chQuery = args.ch_query
 
     # nltk.download('punkt') link:  https://github.com/nltk/nltk/issues/3293
     nltk.download('punkt_tab')
@@ -33,38 +46,38 @@ def main():
 
     # Task1
     ################################
-    print(f"English Query: {engQuery}")
-    print(f"Chinese Query: {chiQuery}")
+    print(f"English Query: {enQuery}")
+    print(f"Chinese Query: {chQuery}")
     print("Task 1")
-    directoryPath = "./EnglishNews/EnglishNews/"
+    directoryPath = "./EnglishNews/"
     documents, fileNames = readDocuments(directoryPath)
     print("Raw-TF Cosine")
-    print('%-11s' % "NewID", "Score")
+    print('%-11s' % "NewsID", "Score")
     VSMTask1 = VectorSpace(documents, fileNames, "RawTF", "cosine", "EN")
-    scoresTask1 = VSMTask1.rankDocuments(engQuery)
-    for NewID, score in scoresTask1:
-        print('%-11s' % NewID, score)
+    scoresTask1 = VSMTask1.rankDocuments(enQuery)
+    for NewsID, score in scoresTask1:
+        print('%-11s' % NewsID, score)
     print('---------------------------------')
     print("TF-IDF Cosine")
-    print('%-11s' % "NewID", "Score")
+    print('%-11s' % "NewsID", "Score")
     VSMTask1 = VectorSpace(documents, fileNames, "TFIDF", "cosine", "EN")
-    VSMTask1 = VSMTask1.rankDocuments(engQuery)
-    for NewID, score in VSMTask1:
-        print('%-11s' % NewID, score)
+    VSMTask1 = VSMTask1.rankDocuments(enQuery)
+    for NewsID, score in VSMTask1:
+        print('%-11s' % NewsID, score)
     print('---------------------------------')
     print("Raw-TF Euclidean")
-    print('%-11s' % "NewID", "Score")
+    print('%-11s' % "NewsID", "Score")
     VSMTask1 = VectorSpace(documents, fileNames, "RawTF", "Euclidean", "EN")
-    scoresTask1 = VSMTask1.rankDocuments(engQuery)
-    for NewID, score in scoresTask1:
-        print('%-11s' % NewID, score)
+    scoresTask1 = VSMTask1.rankDocuments(enQuery)
+    for NewsID, score in scoresTask1:
+        print('%-11s' % NewsID, score)
     print('---------------------------------')
     print("TF-IDF Euclidean")
-    print('%-11s' % "NewID", "Score")
+    print('%-11s' % "NewsID", "Score")
     VSMTask1 = VectorSpace(documents, fileNames, "TFIDF", "Euclidean", "EN")
-    scoresTask1 = VSMTask1.rankDocuments(engQuery)
-    for NewID, score in scoresTask1:
-        print('%-11s' % NewID, score)
+    scoresTask1 = VSMTask1.rankDocuments(enQuery)
+    for NewsID, score in scoresTask1:
+        print('%-11s' % NewsID, score)
     VSMTask1 = None
     scoresTask1 = None
     print("############################################")
@@ -73,20 +86,20 @@ def main():
     # Task2
     ################################
     print("Task 2")
-    directoryPath = "./EnglishNews/EnglishNews/"
+    directoryPath = "./EnglishNews/"
     documents, fileNames = readDocuments(directoryPath)
     print("TF-IDF Cosine")
-    print('%-11s' % "NewID", "Score")
+    print('%-11s' % "NewsID", "Score")
     VSMTask2 = VectorSpace(documents, fileNames, "TFIDF", "cosine", "EN")
-    scoresTask2 = VSMTask2.rankDocuments(engQuery)
-    for NewID, score in scoresTask2:
-        print('%-11s' % NewID, score)
+    scoresTask2 = VSMTask2.rankDocuments(enQuery)
+    for NewsID, score in scoresTask2:
+        print('%-11s' % NewsID, score)
     print('---------------------------------')
     print("TF-IDF Cosine plus feedback")
-    feedbackQuery = VSMTask2.createFeedackQuery(scoresTask2[0])
+    feedbackQuery = VSMTask2.createFeedbackQuery(scoresTask2[0])
     scoresTask2 = VSMTask2.feedbackRel(feedbackQuery)
-    for NewID, score in scoresTask2:
-        print('%-11s' % NewID, score)
+    for NewsID, score in scoresTask2:
+        print('%-11s' % NewsID, score)
     VSMTask2 = None
     scoresTask2 = None
     print("############################################")
@@ -99,21 +112,21 @@ def main():
     # Task3
     ################################
     print("Task 3")
-    directoryPath = "./ChineseNews/ChineseNews/"
+    directoryPath = "./ChineseNews/"
     documents, fileNames = readDocuments(directoryPath)
     VSMTask3 = VectorSpace(documents, fileNames, "RawTF", "cosine", "CN")
-    scoresTask3 = VSMTask3.rankDocuments(chiQuery)
+    scoresTask3 = VSMTask3.rankDocuments(chQuery)
     print("Raw-TF Cosine")
-    print('%-11s' % "NewID", "Score")
-    for NewID, score in scoresTask3:
-        print('%-11s' % NewID, score)
+    print('%-11s' % "NewsID", "Score")
+    for NewsID, score in scoresTask3:
+        print('%-11s' % NewsID, score)
     print('---------------------------------')
     VSMTask3 = VectorSpace(documents, fileNames, "TFIDF", "cosine", "CN")
-    scoresTask3 = VSMTask3.rankDocuments(chiQuery)
+    scoresTask3 = VSMTask3.rankDocuments(chQuery)
     print("TF-IDF Cosine")
-    print('%-11s' % "NewID", "Score")
-    for NewID, score in scoresTask3:
-        print('%-11s' % NewID, score)
+    print('%-11s' % "NewsID", "Score")
+    for NewsID, score in scoresTask3:
+        print('%-11s' % NewsID, score)
     VSMTask3 = None
     scoresTask3 = None
     print("############################################")
@@ -122,7 +135,7 @@ def main():
     # Task4
     ################################
     print("Task 4")
-    directoryPath = "./smaller_dataset/smaller_dataset/"
+    directoryPath = "./smaller_dataset/"
     documentPath = "collections/"
     queryPath = "queries/"
     relPath = "rel.tsv"

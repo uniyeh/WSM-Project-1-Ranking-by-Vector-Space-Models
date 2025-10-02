@@ -8,11 +8,15 @@ class Parser:
 
 	stopwords=[]
 
-	def __init__(self,):
+	def __init__(self, langOpt='EN'):
 		self.stemmer = PorterStemmer()
+		self.langOpt = langOpt
 
 		#English stopwords from ftp://ftp.cs.cornell.edu/pub/smart/english.stop
-		self.stopwords = open('english.stop', 'r').read().split()
+		if langOpt == 'CN':
+			self.stopwords = open('Stopwords/chinese.stop', 'r', encoding='utf-8').read().split()
+		else:
+			self.stopwords = open('Stopwords/english.stop', 'r').read().split()
 
 
 	def clean(self, string):

@@ -3,6 +3,8 @@ from Parser import Parser
 import util
 import jieba
 from ckiptagger import data_utils, construct_dictionary, WS, POS, NER
+import nltk
+from DocVector import DocVector
 
 class VectorSpace:
     """ A algebraic model for representing text documents as vectors of identifiers. 
@@ -22,7 +24,9 @@ class VectorSpace:
     #Collectiorn of IDF vecotors
     idfVectors = []
 
-    #Tidies terms
+    #Store original documents
+    documents = []
+
     parser=None
     weightOpt=None
     similarityOpt=None
@@ -34,18 +38,31 @@ class VectorSpace:
         self.similarityOpt = similarityOpt
         self.langOpt = langOpt
         self.documentVectors=[]
-        self.parser = Parser()
+        self.documents = documents  # Store original documents
+        self.docVector = DocVector()
+        self.parser = Parser(langOpt)
         if(len(documents)>0):
             self.build(documents, langOpt)
 
     def build(self,documents,langOpt):
         """ Create the vector space for the passed document strings """
         if (langOpt == 'CN'):
-            # Tokenize Chinese documents using jieba and join with spaces# Tokenize Chinese documents using jieba and join with spaces
+            # Tokenize Chinese documents using jieba and join with spaces
             documents = [' '.join(jieba.cut(document)) for document in documents]
-           
+
         self.vectorKeywordIndex = self.getVectorKeywordIndex(documents)
-        self.documentVectors = [self.makeVector(document) for document in documents]
+
+        # Build TF vectors
+        tfVectors = [self.makeVector(document) for document in documents]
+
+        # Apply weighting scheme
+        if self.weightOpt == 'TFIDF':
+            # Calculate IDF
+            self.idfVector = self.computeIDF(tfVectors)
+            # Apply TF-IDF weighting
+            self.documentVectors = [self.applyTFIDF(tfVector) for tfVector in tfVectors]
+        else:  # RawTF
+            self.documentVectors = tfVectors
     
     def getVectorKeywordIndex(self, documentList):
         """ create the keyword associated to the position of the elements within the document vectors """
@@ -67,15 +84,38 @@ class VectorSpace:
         return vectorIndex  #(keyword:position)
 
 
-    def makeVector(self, wordString):
-        """ @pre: unique(vectorIndex) """
+    def computeIDF(self, tfVectors):
+        """ Compute IDF (Inverse Document Frequency) for all terms
+        IDF(t) = log(n/k) where n = # of docs, k = # of docs with term t
+        """
+        import numpy as np
+        numDocs = len(tfVectors)
+        idfVector = [0] * len(self.vectorKeywordIndex)
 
+        # Count how many documents contain each term
+        for termIdx in range(len(self.vectorKeywordIndex)):
+            docsWithTerm = sum(1 for tfVector in tfVectors if tfVector[termIdx] > 0)
+            if docsWithTerm > 0:
+                # Use log(n/k) NOT log(n/(1+k))
+                idfVector[termIdx] = np.log(numDocs / docsWithTerm)
+
+        return idfVector
+
+    def applyTFIDF(self, tfVector):
+        """ Apply TF-IDF weighting to a TF vector using Raw TF """
+        # Raw TF: TF(t,d) = f(t,d) (no normalization)
+        # IDF(t) = log(n/k) where n = # docs, k = # docs with term t
+        return [tf * idf for tf, idf in zip(tfVector, self.idfVector)]
+
+    def makeVector(self, wordString):
+        """ Build TF vector for a document """
         #Initialise vector with 0's
         vector = [0] * len(self.vectorKeywordIndex)
         wordList = self.parser.tokenise(wordString)
         wordList = self.parser.removeStopWords(wordList)
         for word in wordList:
-            vector[self.vectorKeywordIndex[word]] += 1; #Use simple Term Count Model
+            if word in self.vectorKeywordIndex:
+                vector[self.vectorKeywordIndex[word]] += 1; #Use simple Term Count Model (Raw TF)
         return vector
 
 
@@ -87,6 +127,11 @@ class VectorSpace:
             query = self.makeVector(query_text)
         else:
             query = self.makeVector(" ".join(termList))
+
+        # Apply TF-IDF weighting if needed
+        if self.weightOpt == 'TFIDF' and hasattr(self, 'idfVector'):
+            query = self.applyTFIDF(query)
+
         return query
 
 
@@ -114,7 +159,7 @@ class VectorSpace:
         if self.langOpt == 'EN':
             self.queryVector = self.buildQueryVector(query)
         else:
-            self.queryVector = self.buildQueryVectorCN(query)
+            self.queryVector = self.buildQueryVector(query)
 
         for i, docVector in enumerate(self.documentVectors):
             score = []
@@ -135,22 +180,136 @@ class VectorSpace:
         else:
             scores.sort(key = lambda x: x[1], reverse = True)  # Sort scores in descending order
         return scores[:10]  # Return top 10 scores
+    
 
-if __name__ == '__main__':
-    #test data
-    documents = ["The cat in the hat disabled",
-                 "A cat is a fine pet ponies.",
-                 "Dogs and cats make good pets.",
-                 "I haven't got a hat."]
+    def createFeedbackQuery (self, topDoc):
+        """ feedback relevant documents """
+        docText = ""
+        for idx, doc in enumerate(self.fileNames):
+            if topDoc[0] == doc:
+                # Get the original document text
+                docText = self.documents[idx]
 
-    vectorSpace = VectorSpace(documents)
+        # Tokenize and POS tag using NLTK
+        tokens = nltk.word_tokenize(docText)
+        pos_tags = nltk.pos_tag(tokens)
 
-    #print(vectorSpace.vectorKeywordIndex)
+        # Extract nouns and verbs (NN* and VB* tags)
+        NNVBList = [word for word, pos in pos_tags if pos.startswith('NN') or pos.startswith('VB')]
 
-    #print(vectorSpace.documentVectors)
+        # Build query vector from filtered words
+        filteredText = ' '.join(NNVBList)
+        docQueryVector = self.buildQueryVector([filteredText])
 
-    print(vectorSpace.related(1))
+        # Combine original query with document feedback (Rocchio algorithm)
+        import numpy as np
+        feedbackQuery = np.array(self.queryVector) + 0.5 * np.array(docQueryVector)
+        return feedbackQuery.tolist()
+    
+    def feedbackRel (self, feedbackQuery):
+        """ feedback relevant documents """
+        scores = []
+        for i, docVector in enumerate(self.documentVectors):
+            score = []
+            score = util.cosine(feedbackQuery, docVector)  # cosine similarity
+            scores.append((self.fileNames[i], score))
+        scores.sort(key = lambda x: x[1], reverse = True)  # Sort scores in descending order
+        return scores[:10]  # Return top 10 scores
 
-    #print(vectorSpace.search(["cat"]))
 
-###################################################
+class RankEvaluation(VectorSpace):
+    
+    # for every query, store the MAP, MRR, and Recall
+    rankList = [] # len should be query size and each element should be a list of tuples (docID, score), and size is 10
+    isRelQueries = [] # len should be query size and each element should be a list of 1 or 0, and size is 10
+    map = 0
+    mrr = 0
+    recall = 0
+    queryNames = []
+    relDict = {}
+    queryRelDict = {}
+
+    def __init__(self, documents, fileNames, weightOpt, similarityOpt, langOpt, queryNames, relDict):
+        super().__init__(documents, fileNames, weightOpt, similarityOpt, langOpt)
+        self.queryNames = queryNames
+        self.relDict = relDict
+        if relDict:
+            self.queryRelDict = self.__buildQueryRel(relDict)
+
+    def __buildQueryRel(self, relDict):
+        return {query: len(relevantDocs) for query, relevantDocs in relDict.items()}
+
+    def __checkRel(self, i, docID):
+        # print(self.relDict[self.queryNames[i]], docID)
+        return 1 if docID.replace("d", "") in self.relDict[self.queryNames[i]] else 0
+    
+    def __calculateAP(self, isRelList):
+        """ calculate the mean average precision """
+        precisionQuery = 0
+        count = 0
+        for i, isRel in enumerate(isRelList):
+            if isRel:
+                count += 1
+                precisionQuery += count / (i + 1)
+        apQuery = precisionQuery / count if count != 0 else 0
+        return apQuery
+
+    def __calculateRR(self, isRelList):
+        """ calculate the mean reciprocal rank """
+        for i, isRel in enumerate(isRelList):
+            if isRel:
+                return 1 / (i + 1)
+        return 0
+
+    def __calculateRecall(self, idx, isRelList):
+        """ calculate the recall """
+        numRel = util.total(isRelList)
+        # print(self.queryNames[idx])
+        # print(self.queryRelDict[self.queryNames[idx]], isRelList, numRel / self.queryRelDict[self.queryNames[idx]] if self.queryRelDict[self.queryNames[idx]] != 0 else 0)
+        return numRel / self.queryRelDict[self.queryNames[idx]] if self.queryRelDict[self.queryNames[idx]] != 0 else 0
+    
+    def __calculateMetric(self, idx, isRelList):
+        apScore = self.__calculateAP(isRelList)
+        rrScore = self.__calculateRR(isRelList)   
+        recallScore = self.__calculateRecall(idx, isRelList)
+        return apScore, rrScore, recallScore
+
+    def makeRelList(self, queries):
+        for i, query in enumerate(queries): # self.queryNames[i] is the query ID
+            scores = super().rankDocuments(query)
+            self.rankList.append(scores)
+            # make a list of 1 or 0 for each document in the top 10 e.g., [[1, 0, 1, 0, 0, 0, 0, 0, 0, 0], ...query size]
+            isRel = [self.__checkRel(i, doc) for doc, score in scores]
+            self.isRelQueries.append(isRel)
+        ## Validate Code for check __checkRel function
+        # totalQueriesCount = 0
+        # for queryIdx, rank in enumerate(self.rankList):
+        #     count = 0
+        #     for docID, score in rank:
+        #         if docID.replace("d", "") in self.relDict[self.queryNames[queryIdx]]:
+        #             count += 1
+        #     print(count, sum(self.isRelQueries[queryIdx]))
+        #     if count != sum(self.isRelQueries[queryIdx]):
+        #         print("Error: count != sum")
+        #     else:
+        #         totalQueriesCount += 1
+        # print("Total correct queries count: ", totalQueriesCount)
+
+    def evaluate(self):
+        """ evaluate the performance of the vector space model """
+        apList = []
+        rrList = []
+        recallList = []
+        for i, isRelList in enumerate(self.isRelQueries):
+            apScore, rrScore, recallScore = self.__calculateMetric(i, isRelList)
+            apList.append(apScore)
+            rrList.append(rrScore)
+            recallList.append(recallScore)
+        self.map = util.average(apList)
+        self.mrr = util.average(rrList)
+        self.recall = util.average(recallList)
+        print("--------------------------")
+        print('%-11s' % "MRR@10: ", self.mrr)
+        print('%-11s' % "MAP@10: ", self.map)
+        print('%-11s' % "Recall@10: ", self.recall)
+        print("--------------------------")
