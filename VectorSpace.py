@@ -60,7 +60,9 @@ class VectorSpace:
             # Calculate IDF
             self.idfVector = self.computeIDF(tfVectors)
             # Apply TF-IDF weighting
-            self.documentVectors = [self.applyTFIDF(tfVector) for tfVector in tfVectors]
+            tfidfVectors = [self.applyTFIDF(tfVector) for tfVector in tfVectors]
+            # Normalize vectors (L2 normalization)
+            self.documentVectors = [self.normalizeVector(vec) for vec in tfidfVectors]
         else:  # RawTF
             self.documentVectors = tfVectors
     
@@ -86,7 +88,7 @@ class VectorSpace:
 
     def computeIDF(self, tfVectors):
         """ Compute IDF (Inverse Document Frequency) for all terms
-        IDF(t) = log(n/k) where n = # of docs, k = # of docs with term t
+        IDF(t) = log(n/(k+1)) with smoothing to avoid division by zero
         """
         import numpy as np
         numDocs = len(tfVectors)
@@ -95,8 +97,10 @@ class VectorSpace:
         # Count how many documents contain each term
         for termIdx in range(len(self.vectorKeywordIndex)):
             docsWithTerm = sum(1 for tfVector in tfVectors if tfVector[termIdx] > 0)
-            if docsWithTerm > 0:
-                # Use log(n/k) NOT log(n/(1+k))
+            # Use smoothing: log(n/k)
+            if docsWithTerm == 0:
+                idfVector[termIdx] = 0
+            else:
                 idfVector[termIdx] = np.log(numDocs / docsWithTerm)
 
         return idfVector
@@ -106,6 +110,14 @@ class VectorSpace:
         # Raw TF: TF(t,d) = f(t,d) (no normalization)
         # IDF(t) = log(n/k) where n = # docs, k = # docs with term t
         return [tf * idf for tf, idf in zip(tfVector, self.idfVector)]
+
+    def normalizeVector(self, vector):
+        """ Normalize vector to unit length (L2 normalization) """
+        import numpy as np
+        norm = np.linalg.norm(vector)
+        if norm == 0:
+            return vector
+        return [v / norm for v in vector]
 
     def makeVector(self, wordString):
         """ Build TF vector for a document """
@@ -118,7 +130,6 @@ class VectorSpace:
                 vector[self.vectorKeywordIndex[word]] += 1; #Use simple Term Count Model (Raw TF)
         return vector
 
-
     def buildQueryVector(self, termList):
         """ convert query string into a term vector """
         if self.langOpt == 'CN':
@@ -128,9 +139,10 @@ class VectorSpace:
         else:
             query = self.makeVector(" ".join(termList))
 
-        # Apply TF-IDF weighting if needed
+        # Apply TF-IDF weighting and normalization if needed
         if self.weightOpt == 'TFIDF' and hasattr(self, 'idfVector'):
             query = self.applyTFIDF(query)
+            query = self.normalizeVector(query)
 
         return query
 
@@ -197,6 +209,9 @@ class VectorSpace:
         # Extract nouns and verbs (NN* and VB* tags)
         NNVBList = [word for word, pos in pos_tags if pos.startswith('NN') or pos.startswith('VB')]
 
+        # Store feedback terms for display
+        self.feedbackTerms = NNVBList
+
         # Build query vector from filtered words
         filteredText = ' '.join(NNVBList)
         docQueryVector = self.buildQueryVector([filteredText])
@@ -205,6 +220,12 @@ class VectorSpace:
         import numpy as np
         feedbackQuery = np.array(self.queryVector) + 0.5 * np.array(docQueryVector)
         return feedbackQuery.tolist()
+
+    def getFeedbackQueryText(self):
+        """ Get the feedback query terms as text for display """
+        if hasattr(self, 'feedbackTerms'):
+            return ' '.join(self.feedbackTerms[:20])  # Show first 20 terms
+        return ""
     
     def feedbackRel (self, feedbackQuery):
         """ feedback relevant documents """

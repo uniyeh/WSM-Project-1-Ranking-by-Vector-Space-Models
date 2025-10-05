@@ -38,5 +38,3 @@ class Parser:
 		words = string.split(" ")
 		
 		return [self.stemmer.stem(word,0,len(word)-1) for word in words]
-
-
