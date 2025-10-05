@@ -142,7 +142,7 @@ def main():
     documents, fileNames = readDocuments(directoryPath + documentPath)
     queries, queryNames = readDocuments(directoryPath + queryPath)
     rel = readRel(directoryPath + relPath)
-    VSMTask4 = RankEvaluation(documents, fileNames, "TFITF", "cosine", "EN", queryNames, rel)
+    VSMTask4 = RankEvaluation(documents, fileNames, "TFIDF", "cosine", "EN", queryNames, rel)
     # print(len(VSMTask4a.documentVectors)) # 1460
     # print(VSMTask4a.vectorKeywordIndex) # len = 8305
     VSMTask4.makeRelList(queries)
